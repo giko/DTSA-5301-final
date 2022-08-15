@@ -1,0 +1,136 @@
+---
+title: "NYPD shooting report data visualization, analysis, and modeling based on perpetrator sex."
+author: "Nikita Chudakov"
+date: "2022-07-24"
+output: pdf_document
+---
+Data Location: https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv
+
+This data is the list of every shooting incident that occurred in NYC going back to 2006 through the end of 2021
+
+
+You'll need to install tidyverse and lubridate to knit this Rmd.
+
+```{r, eval=FALSE, echo=TRUE}
+install.packages("tidyverse")
+install.packages("lubridate")
+```
+
+```{r setup, echo=TRUE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse, warn.conflicts = FALSE)
+library(lubridate, warn.conflicts = FALSE)
+options(dplyr.summarise.inform = FALSE)
+```
+
+```{r, echo=TRUE}
+data_url = 'https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv'
+data = read.csv(file = data_url)
+```
+
+# Tidy data
+
+Converting string date to year with lubridate, mapping empty string in perpetrator sex to U.
+
+```{r, echo=TRUE}
+tidy_data <- data %>%
+  mutate(
+    YEAR = year(mdy(OCCUR_DATE)),
+    HOUR = hour(hms(OCCUR_TIME))
+  ) %>%
+  mutate(PERP_SEX = ifelse(PERP_SEX == "", "U", PERP_SEX))
+```
+
+\newpage
+
+# Shooting incident rate by perpetrator sex and year
+```{r, echo=TRUE}
+tidy_data %>% group_by(PERP_SEX, YEAR) %>%
+  summarise(
+    n=n()
+  ) %>% 
+  ggplot(aes(YEAR, n, colour= PERP_SEX)) +
+  geom_point() + theme(legend.position="top")
+```
+F - female, M - male, U - unknown sex
+
+Man perpetrators are the main contributors to the statistics. Also, the interesting fact is that perpetrator sex being unknown eventually seems to grow over time.
+
+\newpage
+
+# Shooting murder count by male by year
+
+Shooting murder is shooting incident resulted in death.
+
+```{r, echo=TRUE}
+inc_men <- tidy_data %>%
+  filter(PERP_SEX == "M")
+inc_men_murder <- inc_men %>%
+  filter(STATISTICAL_MURDER_FLAG == "true")
+
+inc_men_murder_year <- inc_men_murder %>% group_by(YEAR) %>%
+  summarise(
+    n=n()
+  )
+inc_men_murder_year %>%
+  ggplot() + geom_point(aes(YEAR, n))
+
+```
+This graph shows us the steady high number of murders committed by male perpetrators. However, the trend is not completely clear just by looking at those numbers; we'll come to that later.
+
+\newpage
+
+# Shooting murder count by female by year
+
+```{r, echo=TRUE}
+inc_female <- tidy_data %>%
+  filter(PERP_SEX == "F")
+inc_female_murder <- inc_female %>%
+  filter(STATISTICAL_MURDER_FLAG == "true")
+
+inc_female_murder_year <- inc_female_murder %>% group_by(YEAR) %>%
+  summarise(
+    n=n()
+  )
+inc_female_murder_year %>%
+  ggplot() + geom_point(aes(YEAR, n))
+
+```
+Female numbers are very low, but stable in the range of 0 to 15.
+
+\newpage
+
+# Male murderers trend by year and model
+
+Introducing trend number as a change between k year and k-1 year 
+Local polynomial regression model shown as red line on graph.
+
+```{r, echo=TRUE}
+inc_men_year_murder <- inc_men_murder %>% group_by(YEAR) %>%
+  summarise(
+    n=n()
+  ) %>%
+  mutate(trend=ifelse(is.na(lag(n)), 0, n-lag(n)))
+mod <- loess(trend ~ YEAR, inc_men_year_murder)
+inc_men_year_murder <- inc_men_year_murder %>%
+  mutate(pred=predict(mod))
+
+
+ggplot(inc_men_year_murder) +
+  geom_point(aes(YEAR, trend)) + 
+  geom_line(aes(YEAR, pred, color="red")) + 
+  theme(legend.position="top")
+```
+\newpage
+
+# Conclusion
+
+The trend model is evident. The numbers generally fell until 2020, and then the trend went up. This trend can mean anything, from covid-19 spread to the US Capitol attack resulting in nationwide violence. Such an increase is very alarming. Gun control laws seem inefficient, especially for the male perpetrators.
+
+
+There are, of course, many factors lacking in this fundamental analysis. One example would be that the number of perpetrators of unknown sex was going up from 2017, and they can vastly increase numbers for male or female graphs.
+
+# Biases
+
+I do feel like the male murderers should vastly outnumber females. However, maybe female perpetrators are calmer and better disguise themself better. One of the arguments for this theory is that perpetrators of unknown sex have grown after 2017, but the female murderers count is steady.
+
